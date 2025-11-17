@@ -6,6 +6,19 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 
+from config import (
+    SECTION_MAPPING,
+    PDF_CHUNK_SIZE,
+    PDF_CHUNK_OVERLAP,
+    SEMANTIC_CHUNK_SIZE,
+    SEMANTIC_CHUNK_OVERLAP,
+    TOKENS_PER_CHAR,
+    MIN_CHAPTER_SIZE,
+    MIN_TOKEN_COUNT,
+    MAX_TOKEN_COUNT,
+    BUCKET_NAME,
+)
+
 def download_pdf_from_s3(bucket: str, key: str, local_path: str) -> str:
     """
     Download PDF from S3 to local path.
@@ -36,56 +49,6 @@ def load_pdf_with_langchain(pdf_path: str) -> List[Document]:
     loader = PyPDFLoader(pdf_path)
     documents = loader.load()
     return documents
-
-
-# Section mapping from NIAHO table of contents
-SECTION_MAPPING = {
-    'QM': 'Quality Management System',
-    'GB': 'Governing Body',
-    'CE': 'Chief Executive Officer',
-    'MS': 'Medical Staff',
-    'NS': 'Nursing Services',
-    'SM': 'Staffing Management',
-    'MM': 'Medication Management',
-    'SS': 'Surgical Services',
-    'AS': 'Anesthesia Services',
-    'OB': 'Obstetrical Care Services',
-    'LS': 'Laboratory Services',
-    'RC': 'Respiratory Care Services',
-    'MI': 'Medical Imaging',
-    'NM': 'Nuclear Medicine Services',
-    'RS': 'Rehabilitation Services',
-    'ES': 'Emergency Services',
-    'OS': 'Outpatient Services',
-    'DS': 'Dietary Services',
-    'PR': 'Patient Rights',
-    'IC': 'Infection Prevention and Control Program',
-    'MR': 'Medical Records Service',
-    'DC': 'Discharge Planning',
-    'UR': 'Utilization Review',
-    'PE': 'Physical Environment',
-    'TO': 'Organ, Tissue and Eye Procurement',
-    'SB': 'Swing Beds',
-    'TD': 'Admission, Transfer and Discharge',
-    'PC': 'Plan of Care',
-    'RR': 'Residents Rights',
-    'FS': 'Facility Services',
-    'RN': 'Resident Nutrition',
-    'PH-GR': 'Psychiatric Services - General Requirements',
-    'PH-MR': 'Psychiatric Services - Medical Records',
-    'PH-E': 'Psychiatric Services - Evaluation',
-    'PH-NE': 'Psychiatric Services - Neurological Examination',
-    'PH-TP': 'Psychiatric Services - Treatment Plan',
-    'PH-PN': 'Psychiatric Services - Progress Notes',
-    'PH-DP': 'Psychiatric Services - Discharge Planning',
-    'PH-PR': 'Psychiatric Services - Personnel Resources',
-    'PH-MS': 'Psychiatric Services - Medical Staff',
-    'PH-NS': 'Psychiatric Services - Nursing Services',
-    'PH-PS': 'Psychiatric Services - Psychological Services',
-    'PH-SS': 'Psychiatric Services - Social Work Services',
-    'PH-PA': 'Psychiatric Services - Psychosocial Assessment',
-    'PH-TA': 'Psychiatric Services - Therapeutic Activities'
-}
 
 
 def extract_chapter_id(text: str) -> Optional[str]:
@@ -139,7 +102,7 @@ def get_section_name(chapter_id: Optional[str]) -> str:
 def estimate_token_count(text: str) -> int:
     """
     Estimate token count for text.
-    Approximation: 1 token ≈ 4 characters
+    Approximation: 1 token ≈ TOKENS_PER_CHAR characters
     
     Args:
         text: Text content
@@ -147,7 +110,7 @@ def estimate_token_count(text: str) -> int:
     Returns:
         Estimated token count
     """
-    return len(text) // 4
+    return len(text) // TOKENS_PER_CHAR
 
 
 def find_chapter_boundaries(full_text: str) -> List[Tuple[int, str, str]]:
@@ -249,8 +212,8 @@ def chunk_by_chapters(documents: List[Document]) -> List[Dict]:
         print("Warning: No chapters found, using fallback chunking")
         # Fallback to semantic chunking
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=4000,
-            chunk_overlap=200,
+            chunk_size=PDF_CHUNK_SIZE,
+            chunk_overlap=PDF_CHUNK_OVERLAP,
             length_function=len,
             separators=["\n\n", "\n", ". ", " "]
         )
@@ -277,29 +240,29 @@ def chunk_by_chapters(documents: List[Document]) -> List[Dict]:
         
         # Skip table of contents and similar sections
         if is_table_of_contents(chapter_text):
-            print(f"Skipping TOC-like content: {chapter_id}")
+            # print(f"Skipping TOC-like content: {chapter_id}")
             continue
         
         # Skip very small chapters (likely false positives)
-        if len(chapter_text) < 200:
-            print(f"Skipping small chapter: {chapter_id} ({len(chapter_text)} chars)")
+        if len(chapter_text) < MIN_CHAPTER_SIZE:
+            # print(f"Skipping small chapter: {chapter_id} ({len(chapter_text)} chars)")
             continue
         
         token_count = estimate_token_count(chapter_text)
         
         # If chapter is within optimal range, keep as single chunk
-        if 500 <= token_count <= 1500:
+        if MIN_TOKEN_COUNT <= token_count <= MAX_TOKEN_COUNT:
             chunks.append({
                 'text': chapter_text,
                 'chapter_id': chapter_id,
                 'section_name': get_section_name(chapter_id),
                 'title': title
             })
-            print(f"  ✓ {chapter_id}: {token_count} tokens (single chunk)")
+            # print(f"  ✓ {chapter_id}: {token_count} tokens (single chunk)")
         
         # If chapter is too large, split it intelligently
-        elif token_count > 1500:
-            print(f"  ! {chapter_id}: {token_count} tokens (splitting...)")
+        elif token_count > MAX_TOKEN_COUNT:
+            # print(f"  ! {chapter_id}: {token_count} tokens (splitting...)")
             
             # Try to split by subsections first
             subsection_pattern = r'\n([A-Z][A-Z\s]+):\s*\n'
@@ -313,19 +276,19 @@ def chunk_by_chapters(documents: List[Document]) -> List[Dict]:
                         subsection_content = subsections[j + 1].strip()
                         combined = f"{subsection_title}:\n{subsection_content}"
                         
-                        if len(combined) > 200:
+                        if len(combined) > MIN_CHAPTER_SIZE:
                             chunks.append({
                                 'text': combined,
                                 'chapter_id': chapter_id,
                                 'section_name': get_section_name(chapter_id),
                                 'title': f"{title} - {subsection_title}"
                             })
-                print(f"    → Split into {(len(subsections)-1)//2} subsections")
+                # print(f"    → Split into {(len(subsections)-1)//2} subsections")
             else:
                 # No clear subsections, use semantic splitting
                 text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=5000,  # ~1250 tokens
-                    chunk_overlap=300,
+                    chunk_size=SEMANTIC_CHUNK_SIZE,
+                    chunk_overlap=SEMANTIC_CHUNK_OVERLAP,
                     length_function=len,
                     separators=["\n\n", "\n", ". ", " "]
                 )
@@ -338,7 +301,7 @@ def chunk_by_chapters(documents: List[Document]) -> List[Dict]:
                         'section_name': get_section_name(chapter_id),
                         'title': title
                     })
-                print(f"    → Split into {len(sub_chunks)} semantic chunks")
+                # print(f"    → Split into {len(sub_chunks)} semantic chunks")
         
         # If chapter is too small but valid, keep it
         else:
@@ -348,7 +311,7 @@ def chunk_by_chapters(documents: List[Document]) -> List[Dict]:
                 'section_name': get_section_name(chapter_id),
                 'title': title
             })
-            print(f"  ✓ {chapter_id}: {token_count} tokens (kept small chunk)")
+            # print(f"  ✓ {chapter_id}: {token_count} tokens (kept small chunk)")
     
     return chunks
 
@@ -407,62 +370,29 @@ def save_chunks_to_s3(chunks: List[Dict], bucket: str, prefix: str = 'chunks/'):
 
 def main():
     
-    # Configuration
-    BUCKET_NAME = 'medlaunch-rag'
     PDF_KEY = 'raw/niaho_standards.pdf'
     LOCAL_PATH = './downloaded_niaho.pdf'
     
     print("=" * 80)
-    print("OPTIMIZED CHAPTER-BASED CHUNKING")
+    print("Started: CHUNKING")
     print("=" * 80)
     
-    # Step 1: Download and load PDF
-    print("\nStep 1: Downloading PDF from S3...")
+    print("\nDownloading PDF from S3...")
     local_file = download_pdf_from_s3(BUCKET_NAME, PDF_KEY, LOCAL_PATH)
     
-    print("\nStep 2: Loading PDF with LangChain...")
+    print("\nLoading PDF with LangChain...")
     documents = load_pdf_with_langchain(local_file)
     print(f"Loaded {len(documents)} pages")
     
-    # Step 3: Chunk by chapters
-    print("\nStep 3: Chunking by chapters...")
+    print("\nChunking by chapters...")
     raw_chunks = chunk_by_chapters(documents)
     print(f"\nCreated {len(raw_chunks)} chapter-based chunks")
     
-    # Step 4: Create formatted chunk objects
-    print("\nStep 4: Creating formatted chunk objects...")
+    print("\nCreating formatted chunk objects...")
     chunk_objects = create_chunk_objects(raw_chunks)
     
-    # Display statistics
-    token_counts = [c['token_count'] for c in chunk_objects]
-    print(f"\n📊 Chunk Statistics:")
-    print(f"  Total chunks: {len(chunk_objects)}")
-    print(f"  Token count range: {min(token_counts)} - {max(token_counts)}")
-    print(f"  Average tokens: {sum(token_counts) // len(token_counts)}")
-    print(f"  Median tokens: {sorted(token_counts)[len(token_counts)//2]}")
     
-    # Count chunks by section
-    sections = {}
-    for chunk in chunk_objects:
-        section = chunk['metadata']['section']
-        sections[section] = sections.get(section, 0) + 1
-    
-    print(f"\n📋 Chunks by Section:")
-    for section, count in sorted(sections.items(), key=lambda x: x[1], reverse=True)[:10]:
-        print(f"  {section}: {count} chunks")
-    
-    # Display sample chunks
-    print(f"\n📄 Sample Chunks:")
-    for chunk in chunk_objects[:5]:
-        print(f"\n  Chunk ID: {chunk['chunk_id']}")
-        print(f"  Section: {chunk['metadata']['section']}")
-        print(f"  Chapter: {chunk['metadata']['chapter']}")
-        print(f"  Title: {chunk['metadata']['title']}")
-        print(f"  Token Count: {chunk['token_count']}")
-        print(f"  Text preview: {chunk['text'][:100]}...")
-    
-    # Step 5: Save to S3
-    print(f"\n\nStep 5: Saving {len(chunk_objects)} chunks to S3...")
+    print(f"\n\nSaving {len(chunk_objects)} chunks to S3...")
     save_chunks_to_s3(chunk_objects, BUCKET_NAME)
     print("✅ All chunks saved to S3")
     

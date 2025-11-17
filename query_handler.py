@@ -6,13 +6,18 @@ from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 from langchain_aws import BedrockEmbeddings, ChatBedrock
 
-
-# Configuration
-BUCKET_NAME = 'medlaunch-rag'
-EMBEDDINGS_INDEX_KEY = 'embeddings/embeddings_index.json'
-EMBEDDING_MODEL = 'amazon.titan-embed-text-v1'
-LLM_MODEL = 'us.anthropic.claude-3-5-haiku-20241022-v1:0'  # Inference profile ARN
-TOP_K_RESULTS = 5
+from config import (
+    AWS_REGION,
+    BUCKET_NAME,
+    EMBEDDINGS_INDEX_KEY,
+    EMBEDDING_MODEL,
+    LLM_MODEL,
+    LLM_TEMPERATURE,
+    LLM_MAX_TOKENS,
+    TOP_K_RESULTS,
+    SIMILARITY_HIGH_THRESHOLD,
+    SIMILARITY_MEDIUM_THRESHOLD,
+)
 
 
 def get_s3_client():
@@ -24,7 +29,7 @@ def get_bedrock_embeddings():
     """Initialize Bedrock embeddings."""
     return BedrockEmbeddings(
         model_id=EMBEDDING_MODEL,
-        region_name='us-east-1'
+        region_name=AWS_REGION
     )
 
 
@@ -32,10 +37,10 @@ def get_bedrock_llm():
     """Initialize Bedrock LLM (Claude)."""
     return ChatBedrock(
         model_id=LLM_MODEL,
-        region_name='us-east-1',
+        region_name=AWS_REGION,
         model_kwargs={
-            "temperature": 0.1,
-            "max_tokens": 2000
+            "temperature": LLM_TEMPERATURE,
+            "max_tokens": LLM_MAX_TOKENS
         }
     )
 
@@ -264,9 +269,9 @@ def handle_question_mode(query: str, chunks: List[Dict], embeddings_model: Bedro
     
     # Determine confidence based on top similarity score
     top_similarity = search_results[0]['similarity'] if search_results else 0
-    if top_similarity > 0.8:
+    if top_similarity > SIMILARITY_HIGH_THRESHOLD:
         confidence = "high"
-    elif top_similarity > 0.6:
+    elif top_similarity > SIMILARITY_MEDIUM_THRESHOLD:
         confidence = "medium"
     else:
         confidence = "low"
@@ -417,53 +422,53 @@ def main():
         
         # Skip empty queries
         if not user_input:
-            print("⚠️  Please enter a query.\n")
+            print("⚠️ Please enter a query.\n")
             continue
         
         query_count += 1
         
         print("\n" + "="*80)
-        print(f"📝 QUERY #{query_count}: {user_input}")
+        print(f"QUERY #{query_count}: {user_input}")
         print("="*80)
         
         try:
             # Detect query type
             query_type, chapter_id = detect_query_type(user_input)
-            print(f"\n🔎 Detected mode: {query_type.upper()}")
+            print(f"\nDetected mode: {query_type.upper()}")
             
             if query_type == "citation":
-                print(f"📌 Chapter requested: {chapter_id}")
-                print("\n🔄 Retrieving exact text...\n")
+                print(f"Chapter requested: {chapter_id}")
+                print("\nRetrieving exact text...\n")
                 response = handle_citation_mode(chunks, chapter_id, user_input)
             
             else:  # question mode
-                print("\n🔄 Searching knowledge base...")
+                print("\nSearching knowledge base...")
                 response = handle_question_mode(user_input, chunks, embeddings_model, llm)
             
             # Display response
             print("\n" + "-"*80)
-            print("📋 RESPONSE:")
+            print("RESPONSE:")
             print("-"*80 + "\n")
             
             if response['query_type'] == 'citation':
                 if response.get('found') == False:
                     print(f"❌ {response['error']}")
-                    print(f"💡 {response['suggestion']}\n")
+                    print(f"{response['suggestion']}\n")
                 else:
-                    print(f"📖 Chapter: {response['chapter']}")
-                    print(f"📂 Section: {response['source']['section']}")
-                    print(f"📄 Document: {response['source']['document']}")
+                    print(f"Chapter: {response['chapter']}")
+                    print(f"Section: {response['source']['section']}")
+                    print(f"Document: {response['source']['document']}")
                     print(f"\n{'─'*80}")
                     print("EXACT TEXT:")
                     print('─'*80)
                     print(f"\n{response['exact_text']}\n")
                     print('─'*80)
-                    print(f"ℹ️  {response['disclaimer']}\n")
+                    print(f"{response['disclaimer']}\n")
             
             else:  # question mode
-                print(f"💡 Answer:\n\n{response['answer']}\n")
-                print(f"📊 Confidence: {response['confidence'].upper()}")
-                print(f"\n📚 Sources cited:")
+                print(f"Answer:\n\n{response['answer']}\n")
+                print(f"Confidence: {response['confidence'].upper()}")
+                print(f"\nSources cited:")
                 for i, citation in enumerate(response['citations'], 1):
                     print(f"   {i}. Chapter {citation['chapter']} - {citation['section']}")
                     print(f"      (Relevance: {citation['relevance_score']:.1%})")

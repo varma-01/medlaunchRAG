@@ -4,15 +4,16 @@ import os
 from typing import List, Dict
 from langchain_aws import BedrockEmbeddings
 
-
-# Configuration
-BUCKET_NAME = 'medlaunch-rag'
-CHUNKS_PREFIX = 'chunks/'
-EMBEDDINGS_PREFIX = 'embeddings/'
-EMBEDDING_MODEL = 'amazon.titan-embed-text-v1'
-EMBEDDING_DIMENSION = 1536
-LOCAL_CHUNKS_DIR = './local_chunks'
-BATCH_SIZE = 25  # Number of chunks to embed in one API call (max for Titan is ~100)
+from config import (
+    AWS_REGION,
+    BUCKET_NAME,
+    CHUNKS_PREFIX,
+    EMBEDDINGS_PREFIX,
+    EMBEDDING_MODEL,
+    EMBEDDING_DIMENSION,
+    LOCAL_CHUNKS_DIR,
+    BATCH_SIZE,
+)
 
 
 def get_s3_client():
@@ -29,7 +30,7 @@ def get_bedrock_embeddings():
     """
     return BedrockEmbeddings(
         model_id=EMBEDDING_MODEL,
-        region_name='us-east-1'
+        region_name=AWS_REGION
     )
 
 
@@ -148,20 +149,20 @@ def generate_embeddings_batch(chunks: List[Dict], embeddings_model: BedrockEmbed
     return chunks
 
 
-def save_chunks_locally(chunks: List[Dict], local_dir: str):
-    """
-    Save updated chunks with embeddings to local files.
+# def save_chunks_locally(chunks: List[Dict], local_dir: str):
+#     """
+#     Save updated chunks with embeddings to local files.
     
-    Args:
-        chunks: List of chunk dictionaries with embeddings
-        local_dir: Local directory to save chunks
-    """
-    for chunk in chunks:
-        filename = f"chunk_{chunk['chunk_id']}.json"
-        file_path = os.path.join(local_dir, filename)
+#     Args:
+#         chunks: List of chunk dictionaries with embeddings
+#         local_dir: Local directory to save chunks
+#     """
+#     for chunk in chunks:
+#         filename = f"chunk_{chunk['chunk_id']}.json"
+#         file_path = os.path.join(local_dir, filename)
         
-        with open(file_path, 'w') as f:
-            json.dump(chunk, f, indent=2)
+#         with open(file_path, 'w') as f:
+#             json.dump(chunk, f, indent=2)
 
 
 def create_embeddings_index(chunks: List[Dict]) -> Dict:
@@ -183,36 +184,36 @@ def create_embeddings_index(chunks: List[Dict]) -> Dict:
     return index
 
 
-def upload_all_chunks(local_dir: str, bucket: str, prefix: str):
-    """
-    Upload all updated chunks back to S3.
+# def upload_all_chunks(local_dir: str, bucket: str, prefix: str):
+#     """
+#     Upload all updated chunks back to S3.
     
-    Args:
-        local_dir: Local directory containing chunks
-        bucket: S3 bucket name
-        prefix: S3 prefix for chunks
-    """
-    s3 = get_s3_client()
+#     Args:
+#         local_dir: Local directory containing chunks
+#         bucket: S3 bucket name
+#         prefix: S3 prefix for chunks
+#     """
+#     s3 = get_s3_client()
     
-    print(f"\nUploading updated chunks to S3...")
+#     print(f"\nUploading updated chunks to S3...")
     
-    files = [f for f in os.listdir(local_dir) if f.endswith('.json')]
+#     files = [f for f in os.listdir(local_dir) if f.endswith('.json')]
     
-    for filename in files:
-        local_path = os.path.join(local_dir, filename)
-        s3_key = f"{prefix}{filename}"
+#     for filename in files:
+#         local_path = os.path.join(local_dir, filename)
+#         s3_key = f"{prefix}{filename}"
         
-        with open(local_path, 'r') as f:
-            chunk_data = json.load(f)
+#         with open(local_path, 'r') as f:
+#             chunk_data = json.load(f)
         
-        s3.put_object(
-            Bucket=bucket,
-            Key=s3_key,
-            Body=json.dumps(chunk_data, indent=2),
-            ContentType='application/json'
-        )
+#         s3.put_object(
+#             Bucket=bucket,
+#             Key=s3_key,
+#             Body=json.dumps(chunk_data, indent=2),
+#             ContentType='application/json'
+#         )
     
-    print(f"✓ Uploaded {len(files)} chunks to S3")
+#     print(f"✓ Uploaded {len(files)} chunks to S3")
 
 
 def upload_embeddings_index(index: Dict, bucket: str):
@@ -260,11 +261,11 @@ def generate_embeddings(bucket: str):
         Summary dictionary with results
     """
     print("=" * 80)
-    print("EMBEDDING GENERATION (OPTIMIZED)")
+    print("Generating EMBEDDINGS")
     print("=" * 80)
     
     # Step 1: Download all chunks from S3
-    print("\nStep 1: Downloading all chunks from S3...")
+    print("\nDownloading all chunks from S3...")
     local_files = download_all_chunks(bucket, CHUNKS_PREFIX, LOCAL_CHUNKS_DIR)
     
     if not local_files:
@@ -272,27 +273,27 @@ def generate_embeddings(bucket: str):
         return {"status": "error", "message": "No chunks found"}
     
     # Step 2: Load all chunks into memory
-    print("\nStep 2: Loading chunks from local files...")
+    print("\nLoading chunks from local files...")
     chunks = load_chunks_from_local(local_files)
     print(f"Loaded {len(chunks)} chunks")
     
     # Step 3: Generate embeddings for all chunks
-    print("\nStep 3: Generating embeddings with Amazon Titan (batch mode)...")
+    print("\nGenerating embeddings with Amazon Titan (batch mode)...")
     embeddings_model = get_bedrock_embeddings()
     chunks_with_embeddings = generate_embeddings_batch(chunks, embeddings_model, batch_size=BATCH_SIZE)
     
-    # Step 4: Save updated chunks locally
-    print("\nStep 4: Saving updated chunks locally...")
-    save_chunks_locally(chunks_with_embeddings, LOCAL_CHUNKS_DIR)
+    # # Step 4: Save updated chunks locally
+    # print("\nStep 4: Saving updated chunks locally...")
+    # save_chunks_locally(chunks_with_embeddings, LOCAL_CHUNKS_DIR)
     
     # Step 5: Create embeddings index
     print("\nStep 5: Creating embeddings index...")
     embeddings_index = create_embeddings_index(chunks_with_embeddings)
     print(f"Created index with {len(chunks_with_embeddings)} chunks")
     
-    # Step 6: Upload all chunks back to S3
-    print("\nStep 6: Uploading updated chunks to S3...")
-    upload_all_chunks(LOCAL_CHUNKS_DIR, bucket, CHUNKS_PREFIX)
+    # # Step 6: Upload all chunks back to S3
+    # print("\nStep 6: Uploading updated chunks to S3...")
+    # upload_all_chunks(LOCAL_CHUNKS_DIR, bucket, CHUNKS_PREFIX)
     
     # Step 7: Upload embeddings index
     print("\nStep 7: Uploading embeddings index to S3...")
@@ -358,7 +359,7 @@ def lambda_handler(event, context):
 def main():
     """Main function for local testing."""
     result = generate_embeddings(BUCKET_NAME)
-    print(f"\nResult: {json.dumps(result, indent=2)}")
+    # print(f"\nResult: {json.dumps(result, indent=2)}")
 
 
 if __name__ == "__main__":
