@@ -1,0 +1,139 @@
+AWSTemplateFormatVersion: "2025-11-19"
+Description: >
+  Medlaunch RAG Pipeline - Layer + 3 Lambda Functions + IAM Role
+  (Environment variables removed - config handled inside config.py)
+
+Parameters:
+  CodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda ZIPs
+    Default: medlaunch-rag
+
+Resources:
+
+  # ------------------------------------------------------
+  # IAM ROLE
+  # ------------------------------------------------------
+  RagLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: medlaunch-rag-lambda-role
+      AssumeRolePolicyDocument:
+        Version: "2025-11-19"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+      Policies:
+        - PolicyName: rag-s3-bedrock-policy
+          PolicyDocument:
+            Version: "2025-11-19"
+            Statement:
+
+              # S3 ACCESS
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::${CodeBucket}
+                  - !Sub arn:aws:s3:::${CodeBucket}/*
+
+              # Bedrock
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: "*"
+
+
+  # ------------------------------------------------------
+  # LAMBDA LAYER (LangChain + numpy + pydantic-core)
+  # ------------------------------------------------------
+  RagLambdaLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: medlaunch-rag-langchain-layer
+      CompatibleRuntimes:
+        - python3.11
+      Description: LangChain runtime layer for RAG functions
+      Content:
+        S3Bucket: !Ref CodeBucket
+        S3Key: lambda_deployments/layer_py311_x86_64.zip
+
+
+  # ------------------------------------------------------
+  # PDF PROCESSOR LAMBDA (NO ENV VARS)
+  # ------------------------------------------------------
+  PdfProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medlaunch-pdf-processor
+      Handler: pdf_processor.lambda_handler
+      Runtime: python3.11
+      Timeout: 120
+      MemorySize: 1024
+      Role: !GetAtt RagLambdaRole.Arn
+      Layers:
+        - !Ref RagLambdaLayer
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: lambda_deployments/pdf_processor_lambda.zip
+
+
+  # ------------------------------------------------------
+  # EMBEDDING GENERATOR LAMBDA (NO ENV VARS)
+  # ------------------------------------------------------
+  EmbeddingGeneratorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medlaunch-embedding-generator
+      Handler: embedding_generator.lambda_handler
+      Runtime: python3.11
+      Timeout: 900
+      MemorySize: 2048
+      Role: !GetAtt RagLambdaRole.Arn
+      Layers:
+        - !Ref RagLambdaLayer
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: lambda_deployments/embedding_generator_lambda.zip
+
+
+  # ------------------------------------------------------
+  # QUERY HANDLER LAMBDA (NO ENV VARS)
+  # ------------------------------------------------------
+  QueryHandlerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medlaunch-query-handler
+      Handler: query_handler.lambda_handler
+      Runtime: python3.11
+      Timeout: 60
+      MemorySize: 1024
+      Role: !GetAtt RagLambdaRole.Arn
+      Layers:
+        - !Ref RagLambdaLayer
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: lambda_deployments/query_handler_lambda.zip
+
+
+Outputs:
+  PdfProcessorArn:
+    Value: !GetAtt PdfProcessorFunction.Arn
+
+  EmbeddingGeneratorArn:
+    Value: !GetAtt EmbeddingGeneratorFunction.Arn
+
+  QueryHandlerArn:
+    Value: !GetAtt QueryHandlerFunction.Arn
+
+  LayerArn:
+    Value: !Ref RagLambdaLayer
