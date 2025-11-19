@@ -83,7 +83,8 @@ __pycache__/
 # Virtual environments
 myenv/
 venv/
-lambda_build/
+lambda_layer/
+python/
 
 # AWS credentials
 .env
