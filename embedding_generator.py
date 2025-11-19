@@ -323,18 +323,19 @@ def generate_embeddings(bucket: str):
     
     return summary
 
-
 def lambda_handler(event, context):
     """
-    AWS Lambda handler function.
+    AWS Lambda handler for embedding generation.
     
-    Expected event format:
+    Event format:
     {
-        "bucket_name": "medlaunch-rag"  # optional
+        "bucket_name": "medlaunch-rag"
     }
     """
     try:
-        bucket = event.get('bucket_name', BUCKET_NAME)
+        bucket = event.get('bucket_name', os.environ.get('BUCKET_NAME', 'medlaunch-rag'))
+        
+        print(f"Generating embeddings for bucket: {bucket}")
         result = generate_embeddings(bucket)
         
         return {
@@ -343,18 +344,14 @@ def lambda_handler(event, context):
         }
         
     except Exception as e:
-        print(f"Error in lambda_handler: {str(e)}")
+        print(f"Error: {str(e)}")
         import traceback
         traceback.print_exc()
         
         return {
             'statusCode': 500,
-            'body': json.dumps({
-                'status': 'error',
-                'error': str(e)
-            })
+            'body': json.dumps({'error': str(e)})
         }
-
 
 def main():
     """Main function for local testing."""

@@ -367,6 +367,61 @@ def save_chunks_to_s3(chunks: List[Dict], bucket: str, prefix: str = 'chunks/'):
             ContentType='application/json'
         )
 
+def lambda_handler(event, context):
+    """
+    AWS Lambda handler for PDF processing.
+    
+    Event format:
+    {
+        "pdf_key": "raw/niaho_standards.pdf",
+        "bucket_name": "medlaunch-rag"
+    }
+    """
+    import os
+    
+    try:
+        pdf_key = event.get('pdf_key', 'raw/niaho_standards.pdf')
+        bucket = event.get('bucket_name', os.environ.get('BUCKET_NAME', 'medlaunch-rag'))
+        local_path = '/tmp/downloaded.pdf'
+        
+        print(f"Processing: s3://{bucket}/{pdf_key}")
+        
+        # Download
+        download_pdf_from_s3(bucket, pdf_key, local_path)
+        
+        # Load
+        documents = load_pdf_with_langchain(local_path)
+        print(f"Loaded {len(documents)} pages")
+        
+        # Chunk
+        raw_chunks = chunk_by_chapters(documents)
+        
+        # Format and save
+        chunk_objects = create_chunk_objects(raw_chunks)
+        save_chunks_to_s3(chunk_objects, bucket)
+        
+        # Cleanup
+        if os.path.exists(local_path):
+            os.remove(local_path)
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'PDF processed successfully',
+                'total_chunks': len(chunk_objects),
+                'bucket': bucket
+            })
+        }
+        
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': str(e)})
+        }
 
 def main():
     
@@ -399,6 +454,7 @@ def main():
     print("\n" + "=" * 80)
     print(f"✅ CHUNKING COMPLETE - {len(chunk_objects)} chunks created")
     print("=" * 80)
+
 
 
 if __name__ == "__main__":

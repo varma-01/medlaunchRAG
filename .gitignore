@@ -65,3 +65,29 @@ cache/
 # IDE
 .vscode/
 .idea/
+
+# Lambda deployment packages
+lambda_deployments/
+*.zip
+lambda_build/
+
+# Local chunks and downloads
+local_chunks/
+downloaded_*.pdf
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+myenv/
+venv/
+lambda_build/
+
+# AWS credentials
+.env
+.aws/
+
+# Downloaded embeddings
+embeddings_index.json
